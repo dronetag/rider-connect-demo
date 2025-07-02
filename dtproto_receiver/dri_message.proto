@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package dtproto_receiver;
+
+import "dtproto_receiver/adsl_payload.proto";
+import "dtproto_receiver/odid_payload.proto";
+
+message Location {
+    float latitude = 1;
+    float longitude = 2;
+}
+
+message PreciseTimestamp { 
+    /* Timestamp in unixtime ms of the receiver */
+    uint64 ms = 1;
+    /* Timestamp fraction of ms scale 2^-32 */
+    uint64 frac = 3;
+}
+
+enum ReceiverType {
+    UNKNOWN = 0;
+    ESP32 = 1;
+    NRF52 = 2;
+    NIC = 3;
+}
+
+message RecieverData {
+    optional PreciseTimestamp timestamp = 1;
+    optional Location location = 2;
+    ReceiverType receiver_type = 3;
+    uint32 component_id = 4;
+}
+
+message DriMessage {
+    oneof message {
+        AdslPayload adsl_payload = 1;
+        OdidPayload odid_payload = 2;
+    }
+    optional RecieverData receiver_data = 3;
+}

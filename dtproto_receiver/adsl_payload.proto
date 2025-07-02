@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package dtproto_receiver;
+
+enum AdslFrequency {
+    ADSL_BAND_M_1  = 0;
+    ADSL_BAND_M_2  = 1;
+    ADSL_BAND_O  = 2;
+}
+
+message AdslPayload {
+    AdslFrequency   frequency       = 1;
+    int32           rssi            = 2;
+
+    bytes           encoded_message = 3;
+}

@@ -1,0 +1,3 @@
+* mangle_names:M_STRIP_PACKAGE
+
+AdslPayload.encoded_message max_size:255

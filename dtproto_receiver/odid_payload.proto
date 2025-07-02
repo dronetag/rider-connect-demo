@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package dtproto_receiver;
+
+enum OdidStandard {
+    ODID_STANDARD_ASD_STAN  = 0;
+    ODID_STANDARD_ASTM      = 1;
+}
+
+enum OdidWifiFrequency {
+    ODID_WIFI_FREQ_2_4_GHZ  = 0;
+    ODID_WIFI_FREQ_5_GHZ    = 1;
+}
+
+message OdidWifiBeaconInfo {
+    bytes               mac         = 1;
+    int32               rssi        = 2;
+    uint32              channel     = 3;
+    OdidWifiFrequency   frequency   = 4;
+}
+
+message OdidWifiNanInfo {
+    bytes               mac         = 1;
+    int32               rssi        = 2;
+    OdidWifiFrequency   frequency   = 3;
+}
+
+message OdidBluetoothLegacyInfo {
+    bytes mac     = 1;
+    int32 rssi    = 2;
+}
+
+message OdidBluetoothLongRangeInfo {
+    bytes mac     = 1;
+    int32 rssi    = 2;
+}
+
+message OdidPayload {
+    uint32          counter     = 1;
+    OdidStandard    standard    = 2;
+
+    oneof transmission_info {
+        OdidWifiBeaconInfo          wifi_beacon_info            = 3;
+        OdidWifiNanInfo             wifi_nan_info               = 4;
+        OdidBluetoothLegacyInfo     bluetooth_legacy_info       = 5;
+        OdidBluetoothLongRangeInfo  bluetooth_long_range_info   = 6;
+    }
+
+    bytes encoded_message = 10;
+}

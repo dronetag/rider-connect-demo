@@ -1,0 +1,15 @@
+* mangle_names:M_STRIP_PACKAGE
+
+OdidWifiBeaconInfo.mac fixed_length:true
+OdidWifiBeaconInfo.mac max_size:6
+
+OdidWifiNanInfo.mac fixed_length:true
+OdidWifiNanInfo.mac max_size:6
+
+OdidBluetoothLegacyInfo.mac fixed_length:true
+OdidBluetoothLegacyInfo.mac max_size:6
+
+OdidBluetoothLongRangeInfo.mac fixed_length:true
+OdidBluetoothLongRangeInfo.mac max_size:6
+
+OdidPayload.encoded_message max_size:255
