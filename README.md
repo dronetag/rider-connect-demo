@@ -28,10 +28,45 @@ pip install dtproto_receiver-2.1.0-py3-none-any.whl
 ## Example Usage
 
 ```bash
-python slip_serial.py -p /dev/ttyUSB0 --init "2A0A0A"
+python odid_slip_reader.py -p /dev/ttyUSB0 --init "2A0A0A"
 ```
 
-Replace `/dev/ttyUSB0` with your actual serial port name.
+Replace `/dev/ttyUSB0` with your actual serial port name (the Dronetag RIDER appears as `/dev/ttyDRI` after the udev rule is installed).
+
+---
+
+## Automated Installation (udev + systemd)
+
+`install.sh` installs the slip reader into a system-wide virtual environment, creates a udev rule that detects the Dronetag RIDER, and starts the reader automatically each time the device is plugged in. Output is written to a datetime-stamped log file.
+
+### Usage
+
+```bash
+sudo ./install.sh --output ./output
+```
+
+The `--output` argument sets the directory where log files are written. Each connection creates a new file named `<YYYYMMDD_HHMMSS>_<device>.log` inside that directory.
+
+### What it installs
+
+| Path | Description |
+|---|---|
+| `/opt/odid_slip_reader/` | Script, wheel, and virtual environment |
+| `/etc/udev/rules.d/99-odid-rider.rules` | Udev rule for Dronetag RIDER (VID `10c4`, PID `ea60`, serial `0x6969`) |
+| `/etc/systemd/system/odid-slip-reader@.service` | Systemd service template started by the udev rule |
+
+### How it works
+
+1. The udev rule matches the Dronetag RIDER on plug-in and sets `SYSTEMD_WANTS=odid-slip-reader@<dev>.service`.
+2. The systemd service calls the wrapper script with the kernel device name.
+3. The wrapper opens the serial port and redirects all output to `<output_dir>/<timestamp>_<dev>.log`.
+
+To verify after plugging in:
+
+```bash
+systemctl status "odid-slip-reader@ttyUSB0.service"
+ls ./output/
+```
 
 ---
 
