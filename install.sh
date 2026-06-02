@@ -49,6 +49,7 @@ python3 -m venv "$INSTALL_DIR/venv"
 echo "==> Installing Python dependencies"
 "$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip
 "$INSTALL_DIR/venv/bin/pip" install --quiet pyserial-asyncio betterproto
+"$INSTALL_DIR/venv/bin/pip" install --quiet git+https://github.com/dronetag/python-odid
 if [[ -f "$INSTALL_DIR/dtproto_receiver-2.1.0-py3-none-any.whl" ]]; then
     "$INSTALL_DIR/venv/bin/pip" install --quiet "$INSTALL_DIR/dtproto_receiver-2.1.0-py3-none-any.whl"
 fi

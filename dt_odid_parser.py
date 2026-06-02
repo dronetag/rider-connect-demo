@@ -1,11 +1,21 @@
 import base64
-import json
 from enum import Enum, IntEnum
 from dataclasses import dataclass
 from typing import Optional
-from pyopendroneid import opendroneid
-from pyopendroneid.helper import parseOpenDroneID, datify_opendroneid_dict
 from dtproto_receiver import dri_message_pb2, DriMessage
+
+try:
+    from pyopendroneid.helper import parseOpenDroneID, datify_opendroneid_dict
+    _has_pyopendroneid = True
+except ImportError:
+    _has_pyopendroneid = False
+
+try:
+    import dtpyodid.parser as dtparser
+    _has_dtpyodid = True
+except ImportError:
+    _has_dtpyodid = False
+
 
 class Tech(Enum):
     BT4 = "B4"
@@ -15,95 +25,89 @@ class Tech(Enum):
 
 
 class OdidType(IntEnum):
-    BASIC_ID = opendroneid.ODID_MESSAGETYPE_BASIC_ID
-    LOCATION = opendroneid.ODID_MESSAGETYPE_LOCATION
-    AUTH = opendroneid.ODID_MESSAGETYPE_AUTH
-    SELF_ID = opendroneid.ODID_MESSAGETYPE_SELF_ID
-    SYSTEM = opendroneid.ODID_MESSAGETYPE_SYSTEM
-    OPERATOR_ID = opendroneid.ODID_MESSAGETYPE_OPERATOR_ID
-    PACKED = opendroneid.ODID_MESSAGETYPE_PACKED
-    INVALID = opendroneid.ODID_MESSAGETYPE_INVALID
+    # ASTM F3411 message type values
+    BASIC_ID = 0
+    LOCATION = 1
+    AUTH = 2
+    SELF_ID = 3
+    SYSTEM = 4
+    OPERATOR_ID = 5
+    PACKED = 0xF
+    INVALID = 0xFF  # sentinel — not a protocol value
 
     @classmethod
     def get_type(cls, type_id: int) -> "OdidType":
-        """get_type accepts first byte"""
         try:
             return OdidType((type_id & 0xF0) >> 4)
         except Exception:
             return OdidType.INVALID
-        
+
+
 @dataclass
 class DriReaderInfo:
-    mac: bytes  # should be standard 6-byte MAC address
-    tech: Tech  # transmission technology and format
-    odid_type: OdidType  # message type
+    mac: bytes
+    tech: Tech
+    odid_type: OdidType
     rssi: int
-    counter: int  # message counter for deduplication (beware ADSx do not support this hence -1)
-    recv_id: int = 0  # unique identifier of the chip on the module that received the message
+    counter: int
+    recv_id: int = 0
 
     @classmethod
-    def from_message(
-        cls, dri_message: dri_message_pb2.DriMessage
-    ) -> Optional["DriReaderInfo"]:
-        """Create DriReaderInfo from a DriMessage"""
+    def from_message(cls, dri_message: dri_message_pb2.DriMessage) -> Optional["DriReaderInfo"]:
         recv_id = dri_message.receiver_data.component_id << 4 | dri_message.receiver_data.receiver_type
 
-        if dri_message.HasField("odid_payload"):
-            odid_type = OdidType.get_type(dri_message.odid_payload.encoded_message[0])
-            counter = dri_message.odid_payload.counter
+        if not dri_message.HasField("odid_payload"):
+            return None
 
-            if dri_message.odid_payload.WhichOneof("transmission_info") == "wifi_beacon_info":
-                return DriReaderInfo(
-                    recv_id=recv_id,
-                    odid_type=odid_type,
-                    counter=counter,
-                    mac=dri_message.odid_payload.wifi_beacon_info.mac,
-                    rssi=dri_message.odid_payload.wifi_beacon_info.rssi,
-                    tech=Tech.WIFI_BEACON,
-                )
-            elif dri_message.odid_payload.WhichOneof("transmission_info") == "wifi_nan_info":
-                return DriReaderInfo(
-                    recv_id=recv_id,
-                    odid_type=odid_type,
-                    counter=counter,
-                    mac=dri_message.odid_payload.wifi_nan_info.mac,
-                    rssi=dri_message.odid_payload.wifi_nan_info.rssi,
-                    tech=Tech.WIFI_NAN,
-                )
-            elif dri_message.odid_payload.WhichOneof("transmission_info") == "bluetooth_legacy_info":
-                return DriReaderInfo(
-                    recv_id=recv_id,
-                    odid_type=odid_type,
-                    counter=counter,
-                    mac=dri_message.odid_payload.bluetooth_legacy_info.mac,
-                    rssi=dri_message.odid_payload.bluetooth_legacy_info.rssi,
-                    tech=Tech.BT4,
-                )
-            elif dri_message.odid_payload.WhichOneof("transmission_info") == "bluetooth_long_range_info":
-                return DriReaderInfo(
-                    recv_id=recv_id,
-                    odid_type=odid_type,
-                    counter=counter,
-                    mac=dri_message.odid_payload.bluetooth_long_range_info.mac,
-                    rssi=dri_message.odid_payload.bluetooth_long_range_info.rssi,
-                    tech=Tech.BT5,
-                )
-            else:
-                raise ValueError(
-                    "DRI transmission_info none of "
-                    "wifi_beacon_info, wifi_nan_info, bluetooth_legacy_info, bluetooth_long_range_info"
-                )
-        return None
-        
-def dt_odid_parser(dri_message: dri_message_pb2.DriMessage) -> None:
-    messageType, odid_parsed = parseOpenDroneID(dri_message.odid_payload.encoded_message)
-    if odid_parsed:
-        odid_parsed = datify_opendroneid_dict(odid_parsed)
+        odid_type = OdidType.get_type(dri_message.odid_payload.encoded_message[0])
+        counter = dri_message.odid_payload.counter
+        which = dri_message.odid_payload.WhichOneof("transmission_info")
+
+        if which == "wifi_beacon_info":
+            return DriReaderInfo(recv_id=recv_id, odid_type=odid_type, counter=counter,
+                                 mac=dri_message.odid_payload.wifi_beacon_info.mac,
+                                 rssi=dri_message.odid_payload.wifi_beacon_info.rssi,
+                                 tech=Tech.WIFI_BEACON)
+        elif which == "wifi_nan_info":
+            return DriReaderInfo(recv_id=recv_id, odid_type=odid_type, counter=counter,
+                                 mac=dri_message.odid_payload.wifi_nan_info.mac,
+                                 rssi=dri_message.odid_payload.wifi_nan_info.rssi,
+                                 tech=Tech.WIFI_NAN)
+        elif which == "bluetooth_legacy_info":
+            return DriReaderInfo(recv_id=recv_id, odid_type=odid_type, counter=counter,
+                                 mac=dri_message.odid_payload.bluetooth_legacy_info.mac,
+                                 rssi=dri_message.odid_payload.bluetooth_legacy_info.rssi,
+                                 tech=Tech.BT4)
+        elif which == "bluetooth_long_range_info":
+            return DriReaderInfo(recv_id=recv_id, odid_type=odid_type, counter=counter,
+                                 mac=dri_message.odid_payload.bluetooth_long_range_info.mac,
+                                 rssi=dri_message.odid_payload.bluetooth_long_range_info.rssi,
+                                 tech=Tech.BT5)
+        else:
+            raise ValueError(
+                "DRI transmission_info none of "
+                "wifi_beacon_info, wifi_nan_info, bluetooth_legacy_info, bluetooth_long_range_info"
+            )
+
+
+def dt_odid_parser(dri_message: dri_message_pb2.DriMessage):
+    encoded = dri_message.odid_payload.encoded_message
+
+    if _has_pyopendroneid:
+        _, odid_parsed = parseOpenDroneID(encoded)
+        if odid_parsed:
+            odid_parsed = datify_opendroneid_dict(odid_parsed)
+    elif _has_dtpyodid:
+        odid_parsed = dtparser.parse(encoded)
+    else:
+        odid_parsed = None
+
     dri_info = DriReaderInfo.from_message(dri_message)
     if dri_info is None:
         print("Could not extract the info")
-        return
-    serDict = {
+        return None
+
+    return {
         "mac": dri_info.mac.hex(":"),
         "counter": dri_info.counter,
         "rssi": dri_info.rssi,
@@ -111,6 +115,5 @@ def dt_odid_parser(dri_message: dri_message_pb2.DriMessage) -> None:
         "recv_id": dri_info.recv_id,
         "msg_type": dri_info.odid_type.value,
         "odid": odid_parsed,
-        "odid_raw": base64.b64encode(dri_message.odid_payload.encoded_message),
+        "odid_raw": base64.b64encode(encoded),
     }
-    return serDict
