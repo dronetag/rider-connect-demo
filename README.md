@@ -52,8 +52,10 @@ The `--output` argument sets the directory where log files are written. Each con
 | Path | Description |
 |---|---|
 | `/opt/odid_slip_reader/` | Script, wheel, and virtual environment |
-| `/etc/udev/rules.d/99-odid-rider.rules` | Udev rule for Dronetag RIDER (VID `10c4`, PID `ea60`, serial `0x6969`) |
+| `/etc/udev/rules.d/99-odid-rider.rules` | Udev rule matching Espressif USB JTAG/serial debug unit (VID `303a`, PID `1001`) |
 | `/etc/systemd/system/odid-slip-reader@.service` | Systemd service template started by the udev rule |
+
+> **Warning:** The udev rule matches **any** device with VID `303a` and PID `1001` (Espressif USB JTAG/serial debug unit), not just the Dronetag RIDER. Any device sharing this VID/PID will trigger the service automatically when plugged in.
 
 ### How it works
 

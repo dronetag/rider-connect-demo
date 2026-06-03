@@ -114,17 +114,15 @@ SERVICE_EOF
 sudo systemctl daemon-reload
 
 echo "==> Installing udev rule: $UDEV_RULE_PATH"
-# Dronetag RIDER identification from dtmux.rules:
-#   idVendor 10c4, idProduct ea60, serial 0x6969 -> symlink ttyDRI
+# Espressif USB JTAG/serial debug unit (VID 303a, PID 1001) -> symlink ttyDRI
 sudo tee "$UDEV_RULE_PATH" > /dev/null << UDEV_EOF
 # Dronetag RIDER — ODID SLIP Reader
 # Starts odid-slip-reader@.service; data goes to ${OUTPUT_DIR}/<timestamp>_<dev>.jsonl
 ACTION!="add", GOTO="odid_rider_end"
 
 SUBSYSTEM=="tty",\
- ATTRS{idVendor}=="10c4",\
- ATTRS{idProduct}=="ea60",\
- ATTRS{serial}=="0x6969",\
+ ATTRS{idVendor}=="303a",\
+ ATTRS{idProduct}=="1001",\
  SYMLINK+="ttyDRI",\
  TAG+="systemd",\
  ENV{SYSTEMD_WANTS}+="odid-slip-reader@%k.service",\
