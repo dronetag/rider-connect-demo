@@ -2,10 +2,13 @@ import argparse
 import asyncio
 import binascii
 import json
+import pathlib
 import betterproto
 import serial_asyncio
-from typing import Callable, Dict, List, Awaitable, Optional, Tuple
+from datetime import datetime
+from typing import Callable, Dict, IO, List, Awaitable, Optional, Tuple
 from dtproto_receiver import dri_message_pb2, DriMessage
+
 
 class Slip:
     END = 0x0A
@@ -71,6 +74,7 @@ class SlipSerialReader(asyncio.Protocol):
         except Exception as e:
             print(f"Error processing packet: {e}")
 
+
 class SlipDispatcher:
     def __init__(self) -> None:
         self.handler_map: Dict[int, List[HandlerType]] = {}
@@ -78,7 +82,6 @@ class SlipDispatcher:
     def register_handler(self, address: int, handler: HandlerType) -> None:
         if address not in self.handler_map:
             self.handler_map[address] = []
-
         self.handler_map[address].append(handler)
 
     async def start(self, port: str, baudrate: int = 115200) -> Tuple[serial_asyncio.SerialTransport, SlipSerialReader]:
@@ -91,6 +94,7 @@ class SlipDispatcher:
         )
         return transport, protocol
 
+
 class ProtobufDelimitedBuffer:
     def __init__(self, consumer: Callable[[bytes], Awaitable[None]]):
         self.buffer = bytearray()
@@ -101,12 +105,11 @@ class ProtobufDelimitedBuffer:
         while True:
             msg, remaining = self._extract_next_message(self.buffer)
             if msg is None:
-                break  # incomplete message, wait for more data
+                break
             self.buffer = remaining
             await self.consumer(msg)
-    
+
     def _read_varint(self, buf: bytearray) -> Tuple[int, int]:
-        """Returns (value, length of varint)"""
         result = 0
         shift = 0
         for i, byte in enumerate(buf):
@@ -116,61 +119,37 @@ class ProtobufDelimitedBuffer:
             shift += 7
         raise ValueError("Incomplete varint")
 
-
     def _extract_next_message(self, buf: bytearray) -> Tuple[Optional[bytes], bytearray]:
         try:
             size, size_len = self._read_varint(buf)
             if len(buf) < size_len + size:
-                return None, buf  # incomplete payload
-            msg_start = size_len
-            msg_end = size_len + size
-            msg = bytes(buf[msg_start:msg_end])
-            return msg, buf[msg_end:]
+                return None, buf
+            msg = bytes(buf[size_len:size_len + size])
+            return msg, buf[size_len + size:]
         except Exception:
-            return None, buf  # malformed or incomplete
+            return None, buf
 
-# When Dronetag Internal parsing libararies are available
+
 try:
-    from dt_odid_parser import dt_odid_parser
-
-    async def dt_dri_pb_handler(payload: bytes) -> None:
-        print(f"Handled PB message with payload: {binascii.hexlify(payload)}")
-
-        dri_message = dri_message_pb2.DriMessage.FromString(payload)
-        if not dri_message.HasField("odid_payload"):
-            return
-    
-        serDict = dt_odid_parser(dri_message)
-        if(not serDict):
-            print("Message could not been parsed")
-        print(json.dumps(serDict, default=str))
-
-
+    from dt_odid_parser import dt_odid_parser as _dt_odid_parser
+    _has_internal_parser = True
 except Exception as e:
-    print(f"Dronetag parser not available dumping just the protobufs: {e}")
-    
-    async def dt_dri_pb_handler(payload: bytes) -> None:
-        print(f"Handled PB message with payload: {binascii.hexlify(payload)}")
+    print(f"Dronetag internal parser not available: {e}")
+    _has_internal_parser = False
 
-        try:
-            dri = DriMessage().parse(payload)
-            dri_dict = dri.to_dict(casing=betterproto.Casing.SNAKE)
-            print(json.dumps(dri_dict))
-        except ValueError as e:
-            print("Could not parse dri message %s", e)
-            return None
-    pass
 
-protobuf_buffer = ProtobufDelimitedBuffer(dt_dri_pb_handler)
-    
-async def dt_odid_pb_handler(payload: bytes) -> None:
-    await protobuf_buffer.feed(payload)
+def _open_storage(storage_arg: str, port: str) -> IO[str]:
+    directory = pathlib.Path(storage_arg)
+    directory.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    devname = pathlib.Path(port).name
+    return open(directory / f"{timestamp}_{devname}.jsonl", "a")
 
-async def handler1(payload: bytes) -> None:
-    print(f"[Handler1] Payload: {payload!r}")
 
-async def handler2(payload: bytes) -> None:
-    print(f"[Handler2] Payload length: {len(payload)}")
+def _write_jsonl(f: IO[str], data: dict) -> None:
+    f.write(json.dumps(data, default=str) + "\n")
+    f.flush()
+
 
 async def main():
     parser = argparse.ArgumentParser(description="Async SLIP Serial Reader with Handler Dispatch")
@@ -180,17 +159,55 @@ async def main():
     parser.add_argument(
         "-b", "--baudrate", type=int, default=115200, help="Baudrate for the serial port (default: 115200)"
     )
-    parser.add_argument("--init", type=str, default="2A0A0A", help="Initial message to send as hex string (e.g., '010203aabb')")
+    parser.add_argument(
+        "--init", type=str, default="2A0A0A", help="Initial message to send as hex string (e.g., '010203aabb')"
+    )
+    parser.add_argument(
+        "--storage", type=str, default=None,
+        help="Directory (or .jsonl file path) to write decoded messages as JSONL. "
+             "When a directory is given a timestamped file is created per session."
+    )
 
     args = parser.parse_args()
 
-    dispatcher = SlipDispatcher()
+    storage_file: Optional[IO[str]] = None
+    if args.storage:
+        storage_file = _open_storage(args.storage, args.port)
+        print(f"Storing decoded messages to: {storage_file.name}")
 
+    if _has_internal_parser:
+        async def dt_dri_pb_handler(payload: bytes) -> None:
+            print(f"Handled PB message with payload: {binascii.hexlify(payload)}")
+            dri_message = dri_message_pb2.DriMessage.FromString(payload)
+            if not dri_message.HasField("odid_payload"):
+                return
+            ser_dict = _dt_odid_parser(dri_message)
+            if not ser_dict:
+                print("Message could not be parsed")
+                return
+            print(json.dumps(ser_dict, default=str))
+            if storage_file:
+                _write_jsonl(storage_file, ser_dict)
+    else:
+        async def dt_dri_pb_handler(payload: bytes) -> None:
+            print(f"Handled PB message with payload: {binascii.hexlify(payload)}")
+            try:
+                dri = DriMessage().parse(payload)
+                dri_dict = dri.to_dict(casing=betterproto.Casing.SNAKE)
+                print(json.dumps(dri_dict))
+                if storage_file:
+                    _write_jsonl(storage_file, dri_dict)
+            except ValueError as e:
+                print(f"Could not parse dri message: {e}")
+
+    protobuf_buffer = ProtobufDelimitedBuffer(dt_dri_pb_handler)
+
+    async def dt_odid_pb_handler(payload: bytes) -> None:
+        await protobuf_buffer.feed(payload)
+
+    dispatcher = SlipDispatcher()
     dispatcher.register_handler(0x2A, dt_odid_pb_handler)
-    # # Example handlers — you can register as needed
-    # dispatcher.register_handler(0x01, handler1)
-    # dispatcher.register_handler(0x01, handler2)
-    # Start and get the protocol instance
+
     transport, _ = await dispatcher.start(args.port, baudrate=args.baudrate)
 
     if args.init:
@@ -201,13 +218,16 @@ async def main():
             print(f"Sent initial hex message: {message.hex()}")
         except binascii.Error as e:
             print(f"Invalid hex string in --init: {e}")
-    
-    # 🔁 Keep running forever to receive incoming messages
-    await asyncio.Event().wait()
-            
+
+    try:
+        await asyncio.Event().wait()
+    finally:
+        if storage_file:
+            storage_file.close()
+
+
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Stopped.")
-
